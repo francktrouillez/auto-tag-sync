@@ -1,0 +1,80 @@
+name: "Auto-Tag Sync"
+author: "Franck Trouillez"
+description: "Automatically sync major and minor tags with the latest release tag"
+branding:
+  color: "red"
+  icon: "tag"
+inputs:
+  github_token:
+    description: "GitHub Token"
+    required: true
+  version_prefix:
+    description: "Version tag prefix"
+    default: "v"
+  version_suffix:
+    description: "Version tag suffix"
+    default: ""
+  version_separator:
+    description: "Version tag separator"
+    default: "."
+runs:
+  using: 'composite'
+  steps:
+    - name: Extract Version Information
+      id: extract_versions
+      shell: bash
+      run: |
+        version=${GITHUB_REF#refs/tags/}
+        prefix="${{ inputs.version_prefix }}"
+        suffix="${{ inputs.version_suffix }}"
+        separator="${{ inputs.version_separator }}"
+
+        # Remove prefix and suffix from the version
+        version=${version#$prefix}
+        version=${version%$suffix}
+
+        # Split the version into parts based on the separator
+        IFS=${separator} read -r -a version_parts <<< "$version"
+
+        major_version="${prefix}${version_parts[0]}${suffix}"
+        echo "major_version=$major_version" >> $GITHUB_OUTPUT
+
+        if [ ${#version_parts[@]} -ge 2 ]; then
+          minor_version="${prefix}${version_parts[0]}$separator${version_parts[1]}${suffix}"
+          echo "minor_version=$minor_version" >> $GITHUB_OUTPUT
+        fi
+
+        if [ ${#version_parts[@]} -ge 3 ]; then
+          patch_version="${prefix}${version_parts[0]}$separator${version_parts[1]}$separator${version_parts[2]}${suffix}"
+          echo "patch_version=$patch_version" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Setup Git config
+      shell: bash
+      run: |
+        git config --global user.email "auto-tag-sync-action@github.com"
+        git config --global user.name "Auto Tag Sync Action"
+
+    - name: Update Major Version Tag
+      shell: bash
+      run: |
+        git tag -f ${{ steps.extract_versions.outputs.major_version }}
+
+    - name: Update Minor Version Tag
+      shell: bash
+      if: steps.extract_versions.outputs.minor_version
+      run: |
+        git tag -f ${{ steps.extract_versions.outputs.minor_version }}
+
+    - name: Update Patch Version Tag
+      shell: bash
+      if: steps.extract_versions.outputs.patch_version
+      run: |
+        git tag -f ${{ steps.extract_versions.outputs.patch_version }}
+
+    - name: Push tags
+      shell: bash
+      run: |
+        git push origin -f --tags
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
